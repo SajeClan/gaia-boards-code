@@ -1,0 +1,145 @@
+#include <SPI.h>
+#include <LoRa.h>
+#include <TinyGPSPlus.h>
+#include <SoftwareSerial.h>
+
+// Pin Definitions
+#define SS_PIN 10             // Slave Select pin for LoRa
+#define RST_PIN 9             // Reset pin for LoRa
+#define DIO0_PIN 7            // DIO0 pin for LoRa
+#define SOUND_SENSOR_PIN A0   // Microphone input pin
+#define GPS_RX_PIN 20         // GPS RX pin for GPS module
+#define GPS_TX_PIN 21         // GPS TX pin for GPS module
+
+// LoRa and Audio Configurations
+#define LORA_FREQUENCY 868.1E6  // Frequency for LoRa communication
+#define AUDIO_BUFFER_SIZE 320   // Buffer for 4 seconds of audio at 8kHz sample rate
+#define THRESHOLD 630           // Threshold for loud sound detection
+#define LED_PIN 3               // LED pin
+const int sampleRate = 8000;    // 8kHz sample rate for sound sampling
+byte audioBuffer[AUDIO_BUFFER_SIZE];  // Buffer to store audio data
+
+// Global Objects
+TinyGPSPlus gps;                // GPS object
+SoftwareSerial ss(GPS_RX_PIN, GPS_TX_PIN); // Software serial for GPS
+
+// Global variables to store GPS data
+float latitude = 0.0;
+float longitude = 0.0;
+uint32_t timestamp = 0;
+
+// Function Prototypes
+void readGPSData();
+void recordAudio();
+void sendGPSData();
+void sendAudioData();
+
+void setup() {
+  // Initialize Serial and GPS
+  Serial.begin(115200);
+  ss.begin(9600);  // Initialize GPS serial communication
+
+  // Initialize LED
+  pinMode(LED_PIN, OUTPUT);
+
+  // Initialize LoRa communication
+  LoRa.setPins(SS_PIN, RST_PIN, DIO0_PIN);
+
+  if (!LoRa.begin(LORA_FREQUENCY)) {
+    Serial.println("LoRa initialization failed!");
+    while (1);  // Stop execution if LoRa fails to initialize
+  }
+
+  // Set LoRa parameters
+  LoRa.setSpreadingFactor(12);
+  LoRa.setSyncWord(0xF3);
+
+  Serial.println("LoRa Transmitter ready");
+
+  // Read GPS data once at setup
+  readGPSData();
+}
+
+void loop() {
+  // Continuously check for valid GPS data
+  readGPSData();
+
+  // Check if a loud sound has been detected
+  int soundLevel = analogRead(SOUND_SENSOR_PIN);
+  if (soundLevel > THRESHOLD) {
+    Serial.println("Sound detected. Recording...");
+    
+    // Turn LED on
+    digitalWrite(LED_PIN, HIGH);
+    // Record and transmit audio and GPS data
+    recordAudio();
+    sendGPSData();
+    sendAudioData();
+
+    //Turn LED off
+    digitalWrite(LED_PIN, LOW);
+
+    Serial.println("Transmission complete, waiting for the next sound.");
+    delay(4000);  // Wait 4 seconds before detecting the next sound
+  }
+}
+
+// Function to read GPS data and store in global variables
+void readGPSData() {
+  while (ss.available() > 0) {
+    gps.encode(ss.read());  // Process GPS data from the GPS module
+  }
+
+  // Store valid GPS data in global variables if available
+  if (gps.location.isValid() && gps.time.isValid()) {
+    latitude = gps.location.lat();
+    longitude = gps.location.lng();
+    
+    // Create timestamp from GPS time
+    int hour = gps.time.hour();
+    int minute = gps.time.minute();
+    int second = gps.time.second();
+    timestamp = (hour * 3600 + minute * 60 + second);
+  } else {
+    // Use default values if GPS data is not valid
+    latitude = 0.000000;
+    longitude = -0.000000;
+    timestamp = millis() / 1000; // Using millis() as a rough approximation for current time
+    Serial.println("Using default GPS data.");
+  }
+}
+
+// Function to record 4 seconds of audio
+void recordAudio() {
+  for (int i = 0; i < AUDIO_BUFFER_SIZE; i++) {
+    audioBuffer[i] = analogRead(SOUND_SENSOR_PIN) >> 2;  // Read and scale audio data
+    delayMicroseconds(125);  // Maintain 8kHz sample rate
+    yield();  // Allow the system to handle other tasks
+  }
+}
+
+// Function to send GPS data via LoRa
+void sendGPSData() {
+  // Format GPS data as a string: latitude, longitude, timestamp
+  String gpsData = String(latitude, 6) + "," + String(longitude, 6) + "," + String(timestamp);
+
+  // Send GPS data via LoRa
+  LoRa.beginPacket();
+  LoRa.write(0x01);  // Packet identifier for GPS data
+  LoRa.print(gpsData);  // Send the formatted GPS string
+  LoRa.endPacket();
+
+  Serial.println("GPS Data sent: " + gpsData);
+}
+
+// Function to send audio data via LoRa in chunks
+void sendAudioData() {
+  for (int i = 0; i < AUDIO_BUFFER_SIZE; i += 100) {
+    LoRa.beginPacket();
+    LoRa.write(0x02);  // Packet identifier for audio data
+    LoRa.write(audioBuffer + i, min(100, AUDIO_BUFFER_SIZE - i));  // Send audio data in chunks of 100 bytes
+    LoRa.endPacket();
+    delay(50);  // Reduce delay to speed up transmission
+  }
+  Serial.println("Audio Data sent!");
+}
