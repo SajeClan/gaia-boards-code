@@ -1,3 +1,4 @@
+
 #include <SPI.h>
 #include <LoRa.h>
 #include <TinyGPSPlus.h>
@@ -80,7 +81,7 @@ void loop() {
     digitalWrite(LED_PIN, LOW);
 
     Serial.println("Transmission complete, waiting for the next sound.");
-    delay(4000);  // Wait 4 seconds before detecting the next sound
+    delay(000);  // Wait 4 seconds before detecting the next sound
   }
 }
 
@@ -114,7 +115,6 @@ void recordAudio() {
   for (int i = 0; i < AUDIO_BUFFER_SIZE; i++) {
     audioBuffer[i] = analogRead(SOUND_SENSOR_PIN) >> 2;  // Read and scale audio data
     delayMicroseconds(125);  // Maintain 8kHz sample rate
-    yield();  // Allow the system to handle other tasks
   }
 }
 
@@ -134,10 +134,10 @@ void sendGPSData() {
 
 // Function to send audio data via LoRa in chunks
 void sendAudioData() {
-  for (int i = 0; i < AUDIO_BUFFER_SIZE; i += 100) {
+  for (int i = 0; i < AUDIO_BUFFER_SIZE; i += 50) {
     LoRa.beginPacket();
     LoRa.write(0x02);  // Packet identifier for audio data
-    LoRa.write(audioBuffer + i, min(100, AUDIO_BUFFER_SIZE - i));  // Send audio data in chunks of 100 bytes
+    LoRa.write(audioBuffer + i, min(50, AUDIO_BUFFER_SIZE - i));  // Send audio data in chunks of 50 bytes
     LoRa.endPacket();
     delay(50);  // Reduce delay to speed up transmission
   }
